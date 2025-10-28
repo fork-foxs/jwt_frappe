@@ -10,10 +10,9 @@ app_icon = "octicon octicon-file-directory"
 app_color = "pink"
 app_email = "Ahmedragheb75@gmail.com"
 app_license = "MIT"
+required_apps = ["frappe"]
 
-
-
-on_session_creation = "jwt_frappe.on_session_creation"
+# on_session_creation = "jwt_frappe.on_session_creation"
 
 # Includes in <head>
 # ------------------
