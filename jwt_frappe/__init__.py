@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
-import frappe
+try:
+    import frappe
+except ImportError:
+    frappe = None
+
 from frappe.utils import cint
 
 __version__ = '1.0.2'
@@ -14,13 +18,16 @@ __version__ = '1.0.2'
 
 
 def on_session_creation(login_manager):
-  from .utils.auth import get_bearer_token
-  if frappe.form_dict.get('use_jwt') and cint(frappe.form_dict.get('use_jwt')):
-    expires_in = 604800
-    frappe.local.response['token'] = get_bearer_token(
-      user=login_manager.user, expires_in=expires_in
-    )["access_token"]
-    frappe.flags.jwt_clear_cookies = True
+    try:
+        from .utils.auth import get_bearer_token
+        if frappe.form_dict.get('use_jwt') and cint(frappe.form_dict.get('use_jwt')):
+            expires_in = 604800
+            frappe.local.response['token'] = get_bearer_token(
+            user=login_manager.user, expires_in=expires_in
+            )["access_token"]
+            frappe.flags.jwt_clear_cookies = True
+    except ImportError:
+        pass
 
 @frappe.whitelist()
 def get_logged_user():
