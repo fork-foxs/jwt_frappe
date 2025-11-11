@@ -13,6 +13,7 @@ app_license = "MIT"
 required_apps = ["frappe"]
 
 on_session_creation = "jwt_frappe.on_session_creation"
+auth_hooks = ["jwt_frappe.utils.token_store.validate_cached_token"]
 
 # Includes in <head>
 # ------------------

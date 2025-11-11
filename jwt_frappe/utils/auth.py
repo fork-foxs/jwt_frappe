@@ -7,6 +7,8 @@ from frappe.auth import LoginManager
 from frappe.utils import cint, get_url, get_datetime
 from frappe.utils.password import check_password, passlibctx, update_password
 
+from jwt_frappe.utils.token_store import cache_access_token
+
 
 
 def get_linked_user(id_type, id):
@@ -124,6 +126,7 @@ def get_bearer_token(user, expires_in=3600):
   id_token_encoded = frappe.safe_decode(id_token_encoded)
   token.id_token = id_token_encoded
   frappe.flags.jwt = id_token_encoded
+  cache_access_token(token["access_token"], user, token.get("expires_in"))
   return token
 
 
