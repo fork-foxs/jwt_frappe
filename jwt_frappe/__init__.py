@@ -20,11 +20,15 @@ __version__ = '1.0.2'
 def on_session_creation(login_manager):
     try:
         from .utils.auth import get_bearer_token
+        from .utils.token_store import resolve_login_token_expiry
         if frappe.form_dict.get('use_jwt') and cint(frappe.form_dict.get('use_jwt')):
-            expires_in = 604800
-            frappe.local.response['token'] = get_bearer_token(
-            user=login_manager.user, expires_in=expires_in
-            )["access_token"]
+            expires_in = resolve_login_token_expiry()
+            token = get_bearer_token(
+                user=login_manager.user,
+                expires_in=expires_in
+            )
+            frappe.local.response['expires_in'] = token.get("expires_in", expires_in)
+            frappe.local.response['token'] = token["access_token"]
             frappe.flags.jwt_clear_cookies = True
     except ImportError:
         pass
