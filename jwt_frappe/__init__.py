@@ -4,7 +4,6 @@ try:
     import frappe
 except ImportError:
     frappe = None
-
 from frappe.utils import cint
 
 __version__ = '1.0.2'
@@ -16,11 +15,10 @@ __version__ = '1.0.2'
 #         login_manager.user, frappe.flags.get('jwt_expire_on'))
 #     frappe.flags.jwt_clear_cookies = True
 
-
 def on_session_creation(login_manager):
     try:
-        from .utils.auth import get_bearer_token
-        from .utils.token_store import resolve_login_token_expiry
+        from jwt_frappe.utils.auth import get_bearer_token
+        from jwt_frappe.utils.token_store import resolve_login_token_expiry
         if frappe.form_dict.get('use_jwt') and cint(frappe.form_dict.get('use_jwt')):
             expires_in = resolve_login_token_expiry()
             token = get_bearer_token(

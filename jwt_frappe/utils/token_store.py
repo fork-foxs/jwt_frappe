@@ -52,19 +52,27 @@ def validate_cached_token() -> None:
 	if not token:
 		return
 
+	# If a token is provided, we MUST use it and it MUST be valid.
+	# We prevent session resume via sid to ensure JWT is the sole authority.
+	form_dict = frappe.local.form_dict
+	form_dict.pop("sid", None)
+
 	data = _load_cached_session(token)
 	if not data:
-		return
+		frappe.throw(frappe._("Invalid or expired token."), frappe.AuthenticationError)
 
 	user = data.get("user")
 	if not user:
-		return
+		frappe.throw(frappe._("Invalid token payload."), frappe.AuthenticationError)
 
 	is_enabled = frappe.db.get_value("User", user, "enabled")
 	if is_enabled != 1:
-		return
+		frappe.throw(frappe._("User {0} is disabled.").format(user or "None"), frappe.AuthenticationError)
 
 	frappe.set_user(user)
+
+	# Restore form_dict because frappe.set_user clears it
+	frappe.local.form_dict = form_dict
 	frappe.local.form_dict.setdefault("_jwt_user", user)
 	frappe.local.form_dict.setdefault("_jwt_session", data)
 
