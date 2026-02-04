@@ -27,6 +27,7 @@ def on_session_creation(login_manager):
             )
             frappe.local.response['expires_in'] = token.get("expires_in", expires_in)
             frappe.local.response['token'] = token["access_token"]
+            frappe.local.response['refresh_token'] = token["refresh_token"]
             frappe.flags.jwt_clear_cookies = True
     except ImportError:
         pass
