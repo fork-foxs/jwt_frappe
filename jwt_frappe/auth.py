@@ -1,22 +1,20 @@
 import frappe
-import jwt
 from frappe.auth import CookieManager, HTTPRequest, LoginManager
 from frappe.translate import get_lang_code
 
 
-# frappe's CookieManager is having old class style
 class CookieManagerJWT(CookieManager, object):
 	def flush_cookies(self, response):
 		# use this opportunity to set the response headers
 		response.headers["X-Client-Site"] = frappe.local.site
 		if frappe.flags.jwt_clear_cookies:
-			# Case when right after login
-			# We set the flag on session_create
+			# Case when right after login with use_jwt=1
+			# We set the flag on session_creation — clear all cookies
+			# so the client never receives a sid cookie
 			self.cookies = frappe._dict()
 		if frappe.flags.jwt:
 			# Case when the incoming request has jwt token
-			# We leave cookies untouched
-			# There can be other browser tabs
+			# We leave cookies untouched (there can be other browser tabs)
 			return
 		return super(CookieManagerJWT, self).flush_cookies(response)
 
@@ -41,37 +39,28 @@ class AnvilHTTPRequest(HTTPRequest):
 		# language
 		self.set_lang()
 
-		# JWT
-		jwt_token = None
-		# Check for Auth Header, if present, replace the request cookie value
-		if frappe.get_request_header("Authorization"):
-			token_header = frappe.get_request_header(
-					"Authorization").split(" ")
-
-			if token_header[0].lower() not in ("basic", "bearer") and ":" not in token_header[-1]:
-				jwt_token = token_header[-1]
-		elif frappe.request.path.startswith('/private/files/') and frappe.request.args.get("token"):
-			jwt_token = frappe.request.args.get("token")
+		# JWT Detection — check *before* session resume
+		jwt_token = self._extract_jwt_token()
 
 		if jwt_token:
+			# When a JWT is present, we MUST prevent Frappe from resuming
+			# a stale/corrupted session via the sid cookie. This is the
+			# root cause of "User None is disabled" errors.
 			headers = frappe._dict(frappe.request.headers)
 			headers["Authorization"] = f"Bearer {jwt_token}"
 			frappe.request.headers = headers
-			# Clear sid to prevent problematic session resume when JWT is provided
+			# Strip sid from form_dict AND from cookies so Session.__init__
+			# falls back to "Guest" sid instead of trying to resume a
+			# potentially broken server session.
 			frappe.local.form_dict.pop("sid", None)
+			if hasattr(frappe.request, 'cookies'):
+				frappe.request.cookies.pop("sid", None)
 
-		# load cookies
+		# load cookies — use our JWT-aware cookie manager
 		frappe.local.cookie_manager = CookieManagerJWT()
 
-		# login
-		try:
-			frappe.local.login_manager = LoginManager()
-		except (frappe.ValidationError, frappe.AuthenticationError):
-			# Handle cases where session resume fails (e.g. User None is disabled)
-			# Fallback to Guest and let subsequent auth hooks (JWT) handle it
-			frappe.local.login_manager = LoginManager()
-			frappe.local.login_manager.user = "Guest"
-			frappe.local.login_manager.make_session()
+		# login / session resume
+		self._init_session()
 
 		if frappe.form_dict._lang:
 			lang = get_lang_code(frappe.form_dict._lang)
@@ -82,3 +71,44 @@ class AnvilHTTPRequest(HTTPRequest):
 
 		# write out latest cookies
 		frappe.local.cookie_manager.init_cookies()
+
+	def _extract_jwt_token(self):
+		"""Extract JWT token from Authorization header or query params.
+
+		Returns the token string if found, None otherwise.
+		"""
+		auth_header = frappe.get_request_header("Authorization")
+		if auth_header:
+			parts = auth_header.split(" ")
+			# Accept raw token (not basic/bearer/token scheme)
+			if parts[0].lower() not in ("basic", "bearer") and ":" not in parts[-1]:
+				return parts[-1]
+
+		# Private file access via query param
+		if (frappe.request.path.startswith('/private/files/')
+				and frappe.request.args.get("token")):
+			return frappe.request.args.get("token")
+
+		return None
+
+	def _init_session(self):
+		"""Initialize LoginManager with a safe fallback for corrupted sessions.
+
+		When JWT is in use but the sid cookie points to a corrupt/expired
+		session, Frappe throws ValidationError ("User None is disabled").
+		We catch this and fall back to Guest — the auth_hooks
+		(validate_cached_token) will then promote to the correct user.
+		"""
+		try:
+			frappe.local.login_manager = LoginManager()
+		except (frappe.ValidationError, frappe.AuthenticationError):
+			# Session resume failed (e.g. user=None, disabled user,
+			# expired session with corrupted state).
+			# Create a clean Guest session so auth_hooks can take over.
+			frappe.local.login_manager = frappe.local.login_manager if hasattr(frappe.local, 'login_manager') else object.__new__(LoginManager)
+			frappe.local.login_manager.user = "Guest"
+			frappe.local.login_manager.info = None
+			frappe.local.login_manager.full_name = None
+			frappe.local.login_manager.user_type = None
+			frappe.local.login_manager.resume = False
+			frappe.local.login_manager.make_session()

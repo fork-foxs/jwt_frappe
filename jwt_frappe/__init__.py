@@ -8,12 +8,22 @@ from frappe.utils import cint
 
 __version__ = '1.0.2'
 
-# def on_session_creation(login_manager):
-#   from jwt_frappe.utils.auth import make_jwt
-#   if frappe.form_dict.get('use_jwt') and cint(frappe.form_dict.get('use_jwt')):
-#     frappe.local.response['token'] = make_jwt(
-#         login_manager.user, frappe.flags.get('jwt_expire_on'))
-#     frappe.flags.jwt_clear_cookies = True
+
+def _install_jwt_cookie_manager():
+    """Replace the standard CookieManager with JWT-aware version.
+
+    This ensures cookies (especially sid) are suppressed on JWT responses,
+    regardless of whether the custom WSGI app or standard frappe.app is used.
+    """
+    from jwt_frappe.auth import CookieManagerJWT
+
+    cm = getattr(frappe.local, "cookie_manager", None)
+    if cm and not isinstance(cm, CookieManagerJWT):
+        jwt_cm = CookieManagerJWT()
+        jwt_cm.cookies = cm.cookies
+        jwt_cm.to_delete = cm.to_delete
+        frappe.local.cookie_manager = jwt_cm
+
 
 def on_session_creation(login_manager):
     try:
@@ -29,8 +39,11 @@ def on_session_creation(login_manager):
             frappe.local.response['token'] = token["access_token"]
             frappe.local.response['refresh_token'] = token["refresh_token"]
             frappe.flags.jwt_clear_cookies = True
+            # Swap cookie manager so flush_cookies suppresses sid/user cookies
+            _install_jwt_cookie_manager()
     except ImportError:
         pass
+
 
 @frappe.whitelist()
 def get_logged_user():

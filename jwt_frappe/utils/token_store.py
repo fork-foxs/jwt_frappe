@@ -71,6 +71,12 @@ def validate_cached_token() -> None:
 
 	frappe.set_user(user)
 
+	# Swap cookie manager so flush_cookies suppresses sid/user cookies
+	# on the response. This works regardless of WSGI app (frappe or jwt_frappe).
+	from jwt_frappe import _install_jwt_cookie_manager
+	_install_jwt_cookie_manager()
+	frappe.flags.jwt = True
+
 	# Restore form_dict because frappe.set_user clears it
 	frappe.local.form_dict = form_dict
 	frappe.local.form_dict.setdefault("_jwt_user", user)
