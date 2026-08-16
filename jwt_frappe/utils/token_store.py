@@ -59,15 +59,15 @@ def validate_cached_token() -> None:
 
 	data = _load_cached_session(token)
 	if not data:
-		frappe.throw(frappe._("Invalid or expired token."), frappe.AuthenticationError)
+		raise frappe.AuthenticationError(frappe._("Invalid or expired token."))
 
 	user = data.get("user")
 	if not user:
-		frappe.throw(frappe._("Invalid token payload."), frappe.AuthenticationError)
+		raise frappe.AuthenticationError(frappe._("Invalid token payload."))
 
 	is_enabled = frappe.db.get_value("User", user, "enabled")
 	if is_enabled != 1:
-		frappe.throw(frappe._("User {0} is disabled.").format(user or "None"), frappe.AuthenticationError)
+		raise frappe.AuthenticationError(frappe._("User {0} is disabled.").format(user or "None"))
 
 	frappe.set_user(user)
 
