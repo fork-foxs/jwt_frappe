@@ -33,7 +33,8 @@ def on_session_creation(login_manager):
             expires_in = resolve_login_token_expiry()
             token = get_bearer_token(
                 user=login_manager.user,
-                expires_in=expires_in
+                expires_in=expires_in,
+                include_id_token=False,
             )
             frappe.local.response['expires_in'] = token.get("expires_in", expires_in)
             frappe.local.response['token'] = token["access_token"]

@@ -65,7 +65,17 @@ def get_token(user, pwd, expires_in=3600, expire_on=None, device=None):
 	frappe.local.response.update(token)
 
 
+_OAUTH_CLIENT_CACHE_KEY = "jwt_frappe:oauth_client_name"
+
+
 def get_oath_client():
+	cached_name = frappe.cache.get_value(_OAUTH_CLIENT_CACHE_KEY)
+	if cached_name:
+		try:
+			return frappe.get_cached_doc("OAuth Client", cached_name)
+		except Exception:
+			frappe.cache.delete_value(_OAUTH_CLIENT_CACHE_KEY)
+
 	client = frappe.db.get_value("OAuth Client", {})
 	if not client:
 		# Make one auto
@@ -80,16 +90,44 @@ def get_oath_client():
 		))
 		client.insert(ignore_permissions=True)
 	else:
-		client = frappe.get_doc("OAuth Client", client)
+		client = frappe.get_cached_doc("OAuth Client", client)
 
+	frappe.cache.set_value(_OAUTH_CLIENT_CACHE_KEY, client.name)
 	return client
 
 
-def get_bearer_token(user, expires_in=3600):
+def _encode_id_token(access_token, user, expiration_time):
 	import hashlib
 	import jwt
 	import frappe.oauth
-	from oauthlib.oauth2.rfc6749.tokens import random_token_generator, OAuth2Token
+
+	if expiration_time:
+		exp = int(
+			(expiration_time - frappe.utils.datetime.datetime(1970, 1, 1)).total_seconds()
+		)
+	else:
+		exp = 0
+
+	id_token_header = {
+			"typ": "jwt",
+			"alg": "HS256"
+	}
+	id_token = {
+			"aud": "token_client",
+			"exp": exp,
+			"sub": frappe.db.get_value(
+				"User Social Login", {"parent": user, "provider": "frappe"}, "userid"
+			),
+			"iss": "frappe_server_url",
+			"at_hash": frappe.oauth.calculate_at_hash(access_token, hashlib.sha256)
+	}
+	id_token_encoded = jwt.encode(
+			id_token, "client_secret", algorithm='HS256', headers=id_token_header)
+	return frappe.safe_decode(id_token_encoded)
+
+
+def get_bearer_token(user, expires_in=3600, include_id_token=True):
+	from oauthlib.oauth2.rfc6749.tokens import random_token_generator
 
 	client = get_oath_client()
 	token = frappe._dict({
@@ -109,23 +147,14 @@ def get_bearer_token(user, expires_in=3600):
 	bearer_token.save(ignore_permissions=True)
 	frappe.db.commit()
 
-	# ID Token
-	id_token_header = {
-			"typ": "jwt",
-			"alg": "HS256"
-	}
-	id_token = {
-			"aud": "token_client",
-			"exp": int((frappe.db.get_value("OAuth Bearer Token", token.access_token, "expiration_time") - frappe.utils.datetime.datetime(1970, 1, 1)).total_seconds()),
-			"sub": frappe.db.get_value("User Social Login", {"parent": bearer_token.user, "provider": "frappe"}, "userid"),
-			"iss": "frappe_server_url",
-			"at_hash": frappe.oauth.calculate_at_hash(token.access_token, hashlib.sha256)
-	}
-	id_token_encoded = jwt.encode(
-			id_token, "client_secret", algorithm='HS256', headers=id_token_header)
-	id_token_encoded = frappe.safe_decode(id_token_encoded)
-	token.id_token = id_token_encoded
-	frappe.flags.jwt = id_token_encoded
+	# Login only needs access / refresh tokens. Skip the OpenID id_token
+	# (and its extra Social Login + JWT encode work) on that path.
+	if include_id_token:
+		id_token_encoded = _encode_id_token(
+			token["access_token"], bearer_token.user, bearer_token.expiration_time
+		)
+		token.id_token = id_token_encoded
+		frappe.flags.jwt = id_token_encoded
 	cache_access_token(token["access_token"], user, token.get("expires_in"))
 	return token
 
